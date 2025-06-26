@@ -1,0 +1,15 @@
+python-dotenv
+langchain>=0.1.16
+langchain-core>=0.1.44
+langchain-community>=0.0.38
+langchain-google-genai>=0.0.11
+langchainhub>=0.1.15
+PyMuPDF
+pymupdf
+sentence-transformers
+transformers
+torch
+faiss-cpu
+faiss-gpu
+accelerate
+typing-extensions
