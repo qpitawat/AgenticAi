@@ -49,15 +49,21 @@ def ask_llm(llm, prompt):
     except AttributeError:
         return str(response).strip()
 
+# ---------- IFC: เปลี่ยนสรุปให้เป็นภาพรวมโมเดลอาคาร ----------
 def summarize_subject_structure(llm, texts):
     joined = "\n".join(texts)
-    prompt = f"""ข้อมูลรายละเอียดวิชา:\n----\n{joined}\n----\n
-    สรุป:
-    1.หมวดวิชา
-    2.ชื่อวิชาแต่ละหมวด
-    3.หน่วยกิตรวม
-    4.หน่วยกิตรวมทั้งหมด"""
+    prompt = f"""ข้อมูลจากไฟล์ IFC (แปลงเป็นข้อความแล้ว):
+----
+{joined}
+----
+สรุปภาพรวมโมเดล:
+1) ชื่อโครงการ/อาคาร (ถ้ามี)
+2) จำนวนชั้น (Building Storeys) และรายชื่อ
+3) จำนวนองค์ประกอบหลัก (เช่น กำแพง ประตู หน้าต่าง เสา คาน พื้น ห้อง/สเปซ)
+4) ข้อมูลเด่น (เช่น พื้นที่หรือปริมาตรถ้ามีใน PropertySet)
+ตอบให้กระชับ ชัดเจน เป็นหัวข้อย่อยภาษาไทย"""
     return ask_llm(llm, prompt)
+# ---------- /IFC ----------
 
 def verify_answer(llm, question, answer, context):
     verify_prompt = f"""
@@ -95,24 +101,23 @@ def main():
                 {previous_conversation}
 
                 วางแผนการทำงานเป็นลำดับ:
-                1. จะค้นหาอะไรเป็นอันดับแรก?
-                2. ถ้าไม่เจอข้อมูล จะทำอย่างไร?
-                3. ถ้าเจอข้อมูล จะสรุปอย่างไร?
+                1. จะค้นหาอะไรเป็นอันดับแรก? (โครงสร้างอาคาร, ชั้น, ชนิดองค์ประกอบ, PropertySet)
+                2. ถ้าไม่เจอข้อมูล จะทำอย่างไร? (ขยายคำค้น/ถามใหม่)
+                3. ถ้าเจอข้อมูล จะสรุปอย่างไร? (อ้างอิงข้อมูลจากบริบทด้านล่าง)
                 คำถาม: {question}
                 """
             plan = ask_llm(llm, planning_prompt)
-            #print(50*"*")
-            #print("[PLAN]", plan)
-            #print(50*"*")
 
             retrieved_docs = multi_query_retriever.invoke(question)
-            #for i, doc in enumerate(retrieved_docs, 1):
-                #print(f"- Doc {i} (source: {doc.metadata.get('source')} page {doc.metadata.get('page')})")
-                #print(doc.page_content[:500], "\n")
             retrieved_texts = [doc.page_content for doc in retrieved_docs]
             combined_context = previous_conversation + "\n" + "\n".join(retrieved_texts)
 
-            if any(kw in question.lower() for kw in ["หมวดวิชา", "หน่วยกิต", "สรุป"]):
+            # ---------- IFC: เงื่อนไขเรียกสรุปภาพรวมโมเดล ----------
+            lower_q = question.lower()
+            if any(kw in lower_q for kw in [
+                "สรุป", "ภาพรวม", "storey", "ชั้น", "จำนวน", "องค์ประกอบ", "กำแพง",
+                "ประตู", "หน้าต่าง", "เสา", "คาน", "พื้น", "space", "พื้นที่", "ปริมาตร", "ifc"
+            ]):
                 answer = summarize_subject_structure(llm, retrieved_texts)
             else:
                 direct_prompt = f"""
@@ -122,12 +127,14 @@ def main():
                 แผนการทำงานล่าสุด:
                 {plan}
                 คำถาม: {question}
-                จากข้อมูลทั้งหมด:
+                จากข้อมูลทั้งหมด (สกัดจากไฟล์ IFC):
                 {combined_context}
 
-                ช่วยตอบให้ละเอียดได้ใจความครบถ้วน ถ้าไม่พบข้อมูล ให้ตอบว่า 'ไม่พบข้อมูล'
+                ช่วยตอบให้ละเอียดได้ใจความครบถ้วน โดยอ้างอิงเฉพาะสิ่งที่พบในบริบทด้านบน
+                ถ้าไม่พบข้อมูล ให้ตอบว่า 'ไม่พบข้อมูล'
                 """
                 answer = ask_llm(llm, direct_prompt)
+            # ---------- /IFC ----------
 
             message_history.append(("user", question))
             message_history.append(("ai", answer))
@@ -139,7 +146,6 @@ def main():
                     break
                 else:
                     attempts += 1
-                    #print(f"BOT: ตรวจสอบแล้วไม่มั่นใจ ลองค้นใหม่ (รอบ {attempts})...")
                     retrieved_docs = multi_query_retriever.invoke(question)
                     retrieved_texts = [doc.page_content for doc in retrieved_docs]
                     combined_context = previous_conversation + "\n" + "\n".join(retrieved_texts)
@@ -149,7 +155,7 @@ def main():
                         แผนการทำงานล่าสุด:
                         {plan}
                         คำถาม: {question}
-                        จากข้อมูลใหม่:
+                        จากข้อมูลใหม่ (สกัดจากไฟล์ IFC):
                         {combined_context}
                         ตอบอีกครั้ง ถ้าไม่พบข้อมูล ให้บอกว่า 'ไม่พบข้อมูล'
                         """)
